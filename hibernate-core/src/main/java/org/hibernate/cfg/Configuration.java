@@ -1733,11 +1733,49 @@ public class Configuration implements Serializable {
 		LOG.debug( "Processing foreign key constraints" );
 
 		itr = getTableMappings();
-		int uniqueInteger = 0;
+		
+		
+		Set<Integer> existingUniqueIntegers = new HashSet<Integer>();
+		final int maxAttempts=10;
+		final int uniqueIntegerHashSize=100000;
+		int nextUniqueInteger = uniqueIntegerHashSize+maxAttempts; //set outside of hash space
+		int uniqueIntegerCollisions=0;
+		boolean useUniqueIntegerHashes=true;
+		
 		Set<ForeignKey> done = new HashSet<ForeignKey>();
+		
 		while ( itr.hasNext() ) {
 			Table table = (Table) itr.next();
-			table.setUniqueInteger( uniqueInteger++ );
+			
+			boolean hashFound=false;
+			if (useUniqueIntegerHashes)
+			{
+				int uniqueHash=table.hashCode() % uniqueIntegerHashSize;
+				if (uniqueHash < 0) {
+					uniqueHash = -uniqueHash;
+				}
+				for (int i=0;i<maxAttempts;i++)
+				{
+					if (!existingUniqueIntegers.contains(uniqueHash)) {
+						existingUniqueIntegers.add(uniqueHash);
+						table.setUniqueInteger( uniqueHash );
+						hashFound=true;
+						break;
+					}
+					uniqueHash++;
+					uniqueIntegerCollisions++;
+					if ( uniqueIntegerCollisions > uniqueIntegerHashSize/2 ) { //Way too many tables for hash size available
+						LOG.debug( "Too many collisions creating unique integer hashes, falling back to sequential integers" );
+						useUniqueIntegerHashes=false;
+						break;
+					}
+				}
+			}
+			
+			if (!hashFound) {
+				table.setUniqueInteger( nextUniqueInteger++ ); //Fallback
+			}
+			
 			secondPassCompileForeignKeys( table, done );
 		}
 
