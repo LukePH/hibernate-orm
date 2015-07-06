@@ -1734,46 +1734,35 @@ public class Configuration implements Serializable {
 
 		itr = getTableMappings();
 		
+		Set<ForeignKey> done = new HashSet<ForeignKey>();
 		
 		Set<Integer> existingUniqueIntegers = new HashSet<Integer>();
-		final int maxAttempts=10;
-		final int uniqueIntegerHashSize=100000;
-		int nextUniqueInteger = uniqueIntegerHashSize+maxAttempts; //set outside of hash space
-		int uniqueIntegerCollisions=0;
-		boolean useUniqueIntegerHashes=true;
-		
-		Set<ForeignKey> done = new HashSet<ForeignKey>();
+		final int maxAttempts = 10;
+		final int uniqueIntegerHashSize = 100000; //99999 will be the largest hash
+		int nextFallbackUniqueInteger = uniqueIntegerHashSize+maxAttempts; //set outside of possible hash space
 		
 		while ( itr.hasNext() ) {
 			Table table = (Table) itr.next();
 			
-			boolean hashFound=false;
-			if (useUniqueIntegerHashes)
-			{
-				int uniqueHash=table.hashCode() % uniqueIntegerHashSize;
-				if (uniqueHash < 0) {
-					uniqueHash = -uniqueHash;
-				}
-				for (int i=0;i<maxAttempts;i++)
-				{
-					if (!existingUniqueIntegers.contains(uniqueHash)) {
-						existingUniqueIntegers.add(uniqueHash);
-						table.setUniqueInteger( uniqueHash );
-						hashFound=true;
-						break;
-					}
-					uniqueHash++;
-					uniqueIntegerCollisions++;
-					if ( uniqueIntegerCollisions > uniqueIntegerHashSize/2 ) { //Way too many tables for hash size available
-						LOG.debug( "Too many collisions creating unique integer hashes, falling back to sequential integers" );
-						useUniqueIntegerHashes=false;
-						break;
-					}
-				}
+			boolean unusedhashFound = false;
+			int uniqueHash=table.hashCode() % uniqueIntegerHashSize; //hash from table name, catalog and schema
+			if (uniqueHash < 0) {
+				uniqueHash = -uniqueHash;
 			}
 			
-			if (!hashFound) {
-				table.setUniqueInteger( nextUniqueInteger++ ); //Fallback
+			//try to set uniqueInteger
+			for (int i=0;i<maxAttempts;i++) {
+				if (!existingUniqueIntegers.contains(uniqueHash)) {
+					existingUniqueIntegers.add(uniqueHash);
+					table.setUniqueInteger( uniqueHash );
+					unusedhashFound=true;
+					break;
+				}
+				uniqueHash++; //if we have a collision
+			}
+			
+			if (!unusedhashFound) {
+				table.setUniqueInteger( nextFallbackUniqueInteger++ ); //Fallback to old method of sequential integers
 			}
 			
 			secondPassCompileForeignKeys( table, done );
